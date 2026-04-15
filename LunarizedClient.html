@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en" style="width:100%;height:100%;background:#0d0f1a;">
+<head>
+	<meta charset="UTF-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+	<title>EaglercraftX Lunarized Client</title>
+	<link rel="icon" type="image/png" href="favicon.png" />
+	<script src="classes.js"></script>
+	<style>
+		:root { color-scheme: dark; }
+		html, body { margin: 0; width: 100%; height: 100%; font-family: Inter, Segoe UI, Arial, sans-serif; }
+		#game_frame { width: 100%; height: 100%; background: #000; }
+		#launcher {
+			position: fixed; inset: 0; z-index: 99; display: grid; place-items: center;
+			background: radial-gradient(circle at top, #20253f 0%, #0b0d16 65%);
+		}
+		.panel {
+			width: min(960px, 94vw); max-height: 92vh; overflow: auto; border-radius: 16px;
+			background: rgba(20, 24, 40, 0.95); border: 1px solid #434b74; padding: 20px;
+			box-shadow: 0 18px 40px rgba(0,0,0,.45);
+		}
+		h1 { margin: 0 0 6px; font-size: 28px; }
+		.sub { margin: 0 0 18px; color: #afbad5; }
+		.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; }
+		.card { border: 1px solid #39425f; border-radius: 12px; padding: 12px; background: #161b2f; }
+		.card h3 { margin: 0 0 8px; font-size: 16px; }
+		label { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px 0; font-size: 14px; }
+		input[type="text"], select, textarea {
+			width: 100%; padding: 8px; border-radius: 8px; border: 1px solid #3b4462; background: #0e1324; color: #fff;
+		}
+		textarea { min-height: 66px; resize: vertical; }
+		.actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 16px; }
+		button {
+			border: 0; border-radius: 10px; padding: 10px 14px; font-weight: 600; cursor: pointer;
+			background: #5d7cff; color: #fff;
+		}
+		button.ghost { background: #252e49; }
+		.small { font-size: 12px; color: #9eabc9; margin-top: 10px; }
+	</style>
+</head>
+<body>
+	<div id="launcher">
+		<div class="panel">
+			<h1>EaglercraftX Lunarized Client</h1>
+			<p class="sub">Lunar-style quick launcher: presets, performance toggles, overlay behavior, and server routing.</p>
+			<div class="grid">
+				<div class="card">
+					<h3>Profile & server</h3>
+					<label>Preset
+						<select id="preset">
+							<option value="balanced">Balanced (Recommended)</option>
+							<option value="performance">Performance</option>
+							<option value="compatibility">Compatibility</option>
+							<option value="competitive">Competitive</option>
+						</select>
+					</label>
+					<label>Auto-join server
+						<input id="joinServer" type="text" placeholder="wss://server.example" />
+					</label>
+					<label>Username language code
+						<input id="lang" type="text" value="en_US" />
+					</label>
+				</div>
+				<div class="card">
+					<h3>Client behavior</h3>
+					<label>Show boot menu <input id="showBootMenu" type="checkbox" /></label>
+					<label>Allow voice chat <input id="allowVoiceClient" type="checkbox" checked /></label>
+					<label>Enable signature badge <input id="enableSignatureBadge" type="checkbox" checked /></label>
+					<label>Open debug console on launch <input id="openDebugConsoleOnLaunch" type="checkbox" /></label>
+				</div>
+				<div class="card">
+					<h3>Graphics and render path</h3>
+					<label>Force WebGL 1.0 <input id="forceWebGL1" type="checkbox" /></label>
+					<label>Force WebGL 2.0 <input id="forceWebGL2" type="checkbox" checked /></label>
+					<label>Disable WebGL extensions <input id="useWebGLExt" type="checkbox" /></label>
+					<label>Enable update service <input id="allowUpdateSvc" type="checkbox" checked /></label>
+				</div>
+				<div class="card">
+					<h3>Relays</h3>
+					<textarea id="relayList" placeholder="wss://relay1.example\nwss://relay2.example"></textarea>
+					<div class="small">One relay per line. First relay becomes primary.</div>
+				</div>
+			</div>
+			<div class="actions">
+				<button id="launch">Launch Client</button>
+				<button class="ghost" id="save">Save Profile</button>
+				<button class="ghost" id="reset">Reset</button>
+			</div>
+			<div class="small">This launcher uses existing EaglercraftX client options to provide a richer pre-game customization layer.</div>
+		</div>
+	</div>
+	<div id="game_frame"></div>
+	<script>
+	"use strict";
+	(function() {
+		var defaults = {
+			preset: "balanced",
+			joinServer: "",
+			lang: "en_US",
+			showBootMenu: false,
+			allowVoiceClient: true,
+			enableSignatureBadge: true,
+			openDebugConsoleOnLaunch: false,
+			forceWebGL1: false,
+			forceWebGL2: true,
+			useWebGLExt: true,
+			allowUpdateSvc: true,
+			relayList: ["wss://relay.deev.is/", "wss://relay.lax1dude.net/", "wss://relay.shhnowisnottheti.me/"]
+		};
+
+		function applyPreset(v) {
+			if(v === "performance") return { forceWebGL2: true, useWebGLExt: true, openDebugConsoleOnLaunch: false, allowUpdateSvc: false };
+			if(v === "compatibility") return { forceWebGL1: true, forceWebGL2: false, useWebGLExt: false };
+			if(v === "competitive") return { forceWebGL2: true, useWebGLExt: true, showBootMenu: false, enableSignatureBadge: false };
+			return {};
+		}
+
+		function byId(id) { return document.getElementById(id); }
+		function loadSaved() {
+			try {
+				var raw = localStorage.getItem("lunarized_launcher_profile_v1");
+				return raw ? JSON.parse(raw) : {};
+			}catch(e){ return {}; }
+		}
+
+		function hydrate() {
+			var state = Object.assign({}, defaults, loadSaved());
+			byId("preset").value = state.preset;
+			byId("joinServer").value = state.joinServer;
+			byId("lang").value = state.lang;
+			["showBootMenu","allowVoiceClient","enableSignatureBadge","openDebugConsoleOnLaunch","forceWebGL1","forceWebGL2","useWebGLExt","allowUpdateSvc"].forEach(function(k){ byId(k).checked = !!state[k]; });
+			byId("relayList").value = (state.relayList || defaults.relayList).join("\n");
+		}
+
+		function collect() {
+			return {
+				preset: byId("preset").value,
+				joinServer: byId("joinServer").value.trim(),
+				lang: byId("lang").value.trim() || "en_US",
+				showBootMenu: byId("showBootMenu").checked,
+				allowVoiceClient: byId("allowVoiceClient").checked,
+				enableSignatureBadge: byId("enableSignatureBadge").checked,
+				openDebugConsoleOnLaunch: byId("openDebugConsoleOnLaunch").checked,
+				forceWebGL1: byId("forceWebGL1").checked,
+				forceWebGL2: byId("forceWebGL2").checked,
+				useWebGLExt: byId("useWebGLExt").checked,
+				allowUpdateSvc: byId("allowUpdateSvc").checked,
+				relayList: byId("relayList").value.split(/\r?\n/).map(function(s){ return s.trim(); }).filter(Boolean)
+			};
+		}
+
+		function toRelays(list) {
+			if(!list.length) list = defaults.relayList.slice();
+			return list.map(function(addr, i){ return { addr: addr, comment: "Custom relay #" + (i + 1), primary: i === 0 }; });
+		}
+
+		function launchClient(cfg) {
+			if(window.location.href.indexOf("file:") === 0) {
+				alert("HTTP only. Run a local HTTP server and load this file over HTTP/HTTPS.");
+				return;
+			}
+			var preset = applyPreset(cfg.preset);
+			var finalCfg = Object.assign({}, cfg, preset);
+			window.eaglercraftXOpts = {
+				container: "game_frame",
+				assetsURI: "assets.epk",
+				localesURI: "lang/",
+				worldsDB: "worlds",
+				lang: finalCfg.lang,
+				joinServer: finalCfg.joinServer || undefined,
+				showBootMenuOnLaunch: finalCfg.showBootMenu,
+				allowVoiceClient: finalCfg.allowVoiceClient,
+				enableSignatureBadge: finalCfg.enableSignatureBadge,
+				openDebugConsoleOnLaunch: finalCfg.openDebugConsoleOnLaunch,
+				forceWebGL1: finalCfg.forceWebGL1,
+				forceWebGL2: finalCfg.forceWebGL2,
+				useWebGLExt: finalCfg.useWebGLExt,
+				allowUpdateSvc: finalCfg.allowUpdateSvc,
+				relays: toRelays(finalCfg.relayList),
+				servers: []
+			};
+			byId("launcher").remove();
+			main();
+		}
+
+		byId("save").addEventListener("click", function() {
+			localStorage.setItem("lunarized_launcher_profile_v1", JSON.stringify(collect()));
+			alert("Saved launcher profile.");
+		});
+		byId("reset").addEventListener("click", function() {
+			localStorage.removeItem("lunarized_launcher_profile_v1");
+			hydrate();
+		});
+		byId("launch").addEventListener("click", function() {
+			launchClient(collect());
+		});
+		hydrate();
+	})();
+	</script>
+</body>
+</html>
